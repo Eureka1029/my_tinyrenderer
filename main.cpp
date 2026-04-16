@@ -1,4 +1,3 @@
-#include <cstdlib>
 #include "our_gl.h"
 #include "model.h"
 
@@ -8,40 +7,46 @@ extern std::vector<double> zbuffer;     // 深度缓冲区
 // Phong光照着色器
 struct PhongShader : IShader {
     const Model &model;
-    TGAColor color = {};      // 表面颜色
-    vec3 tri[3];              // 眼坐标空间中三角形的三个顶点坐标
+    vec3 l;          // 眼坐标空间中的光源方向
+    vec3 tri[3];     // 眼坐标空间中的三角形顶点
+    vec3 varying_nrm[3]; // 每个顶点的法线向量，用于片段着色器插值
 
-    // 构造函数：初始化着色器
-    PhongShader(const Model &m) : model(m) {
+    // 构造函数：初始化着色器并將光源方向转换到眼坐标空间
+    PhongShader(const vec3 light, const Model &m) : model(m) {
+        // 将光源方向向量变换到视图坐标空间
+        l = normalized((ModelView*vec4{light.x, light.y, light.z, 0.}).xyz());
     }
 
-    // 顶点着色器：将物体空间的顶点变换到眼坐标和裁剪空间
+    // 顶点着色器：变换顶点和法线到眼坐标和裁剪空间
     virtual vec4 vertex(const int face, const int vert) {
         vec3 v = model.vert(face, vert);                          // 获取物体坐标空间中的顶点
-        vec4 gl_Position = ModelView * vec4{v.x, v.y, v.z, 1.};   // 通过模型视图矩阵变换到眼坐标空间
-        tri[vert] = gl_Position.xyz();                            // 保存眼坐标下的顶点坐标
-        return Perspective * gl_Position;                         // 通过透视投影矩阵返回裁剪空间的坐标
+        vec3 n = model.normal(face, vert);                        // 获取顶点法线
+        // 使用逆转置矩阵将法线变换到眼坐标空间（保持法线正确性）
+        varying_nrm[vert] = (ModelView.invert_transpose() * vec4{n.x, n.y, n.z, 0.}).xyz();
+        vec4 gl_Position = ModelView * vec4{v.x, v.y, v.z, 1.};   // 变换到眼坐标空间
+        tri[vert] = gl_Position.xyz();                            // 保存眼坐标下的顶点
+        return Perspective * gl_Position;                         // 返回裁剪空间坐标
     }
 
-    // 片段着色器：使用法线计算Phong光照模型
+    // 片段着色器：使用插值法线计算Phong光照
     virtual std::pair<bool,TGAColor> fragment(const vec3 bar) const {
-        // 初始化片段颜色为白色
-        TGAColor gl_FragColor = {255, 255, 255, 255};
+        TGAColor gl_FragColor = {255, 255, 255, 255};             // 片段输出颜色
+        // 使用重心坐标对三个顶点的法线进行插值
+        vec3 n = normalized(varying_nrm[0] * bar[0] +
+                            varying_nrm[1] * bar[1] +
+                            varying_nrm[2] * bar[2]);             // 逐顶点法线插值
+        vec3 r = normalized(n * (n * l)*2 - l);                   // 计算反射光方向
         
-        // 获取光照参数
-        vec3 l = normalized(vec3{1, 1, 1}); // 光源方向（标准化）
-        vec3 n = normalized(cross(tri[1]-tri[0], tri[2]-tri[0])); // 几何法线（由三角形两条边的叉积获得）
-        vec3 r = normalized(l + vec3{0, 0, 1});  // 半程向量（用于镜面反射计算）
-
-        // 计算Phong光照模型的各个分量
-        double ambient = 0.3;                           // 环境光强度
-        double diffuse = std::max(0., n*l);             // 漫反射强度（法线与光线方向的点积）
-        double specular = std::pow(std::max(0., r * n), 40); // 镜面反射强度（指数为40）
+        // 计算Phong光照的各个分量
+        double ambient = .3;                                      // 环境光强度
+        double diff = std::max(0., n * l);                        // 漫反射强度
+        // 镜面反射强度：摄像机位于z轴上（眼空间坐标），所以简单使用r.z
+        double spec = std::pow(std::max(r.z, 0.), 35);            
         
         // 将光照效果应用到每个颜色通道（RGB）
         for (int channel : {0,1,2})
-            gl_FragColor[channel] *= std::min(1., ambient + .4*diffuse + .9*specular);
-        return {false, gl_FragColor};
+            gl_FragColor[channel] *= std::min(1., ambient + .4*diff + .9*spec);
+        return {false, gl_FragColor};                             // 不丢弃该像素
     }
 };
 
@@ -52,10 +57,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // 设置渲染参数
     constexpr int width  = 800;      // 输出图像宽度
     constexpr int height = 800;      // 输出图像高度
+    constexpr vec3  light{ 1, 1, 1}; // 光源位置
     constexpr vec3    eye{-1, 0, 2}; // 摄像机位置
-    constexpr vec3 center{ 0, 0, 0}; // 摄像机朝向（观察点）
+    constexpr vec3 center{ 0, 0, 0}; // 摄像机指向的中心点
     constexpr vec3     up{ 0, 1, 0}; // 摄像机上方向
 
     // 初始化各个变换矩阵
@@ -63,28 +70,20 @@ int main(int argc, char** argv) {
     init_perspective(norm(eye-center));                        // 构建透视投影矩阵
     init_viewport(width/16, height/16, width*7/8, height*7/8); // 构建视口变换矩阵
     init_zbuffer(width, height);                               // 初始化深度缓冲区
-    TGAImage framebuffer(width, height, TGAImage::RGB, {0, 0, 0, 255}); // 创建帧缓冲（黑色背景）
+    TGAImage framebuffer(width, height, TGAImage::RGB);        // 创建帧缓冲
 
     // 遍历所有输入的模型文件
-    for (int m=1; m<argc; m++) {
-        Model model(argv[m]);                       // 加载OBJ模型数据
-        PhongShader shader(model);                  // 为模型创建Phong光照着色器
+    for (int m=1; m<argc; m++) {                    // 遍历所有输入的对象
+        Model model(argv[m]);                       // 加载模型数据
+        PhongShader shader(light, model);           // 为模型创建Phong光照着色器
         
         // 遍历模型的所有三角形面
-        for (int f=0; f<model.nfaces(); f++) {
-            // 为每个面设置随机颜色
-            shader.color = { 
-                static_cast<std::uint8_t>(std::rand() % 255), 
-                static_cast<std::uint8_t>(std::rand() % 255), 
-                static_cast<std::uint8_t>(std::rand() % 255), 
-                255 
-            };
+        for (int f=0; f<model.nfaces(); f++) {      // 遍历所有面
             // 组装三角形图元（三个顶点的同次坐标）
-            Triangle clip = { shader.vertex(f, 0),
+            Triangle clip = { shader.vertex(f, 0),  // 组装图元
                               shader.vertex(f, 1),
                               shader.vertex(f, 2) };
-            // 光栅化三角形并写入帧缓冲
-            rasterize(clip, shader, framebuffer);
+            rasterize(clip, shader, framebuffer);   // 光栅化该三角形到帧缓冲
         }
     }
 
