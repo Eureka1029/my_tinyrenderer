@@ -14,6 +14,9 @@ void init_zbuffer(const int width, const int height);
 struct IShader {
     // 片段着色器虚函数：返回是否丢弃该像素，以及输出颜色
     virtual std::pair<bool,TGAColor> fragment(const vec3 bar) const = 0;
+    static TGAColor sample2D(const TGAImage &img, const vec2 &uvf) {
+        return img.get(uvf[0] * img.width(), uvf[1] * img.height());
+    }
 };
 
 // 三角形图元类型：由三个有序点（同次坐标）组成
