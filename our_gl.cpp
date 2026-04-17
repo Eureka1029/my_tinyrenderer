@@ -14,7 +14,7 @@ void lookat(const vec3 eye, const vec3 center, const vec3 up) {
     vec3 m = normalized(cross(n, l));     // 相机上向量
     // ModelView = 旋转矩阵 * 平移矩阵
     ModelView = mat<4,4>{{{l.x,l.y,l.z,0}, {m.x,m.y,m.z,0}, {n.x,n.y,n.z,0}, {0,0,0,1}}} *
-                mat<4,4>{{{1,0,0,-center.x}, {0,1,0,-center.y}, {0,0,1,-center.z}, {0,0,0,1}}};
+                mat<4,4>{{{1,0,0,-eye.x}, {0,1,0,-eye.y}, {0,0,1,-eye.z}, {0,0,0,1}}};
 }
 
 // 初始化透视投影矩阵（f 是焦距）
@@ -55,7 +55,7 @@ void rasterize(const Triangle &clip, const IShader &shader, TGAImage &framebuffe
             vec3 bc_screen = ABC.invert_transpose() * vec3{static_cast<double>(x), static_cast<double>(y), 1.};
             // 转换为裁剪空间的重心坐标，处理透视变形问题
             vec3 bc_clip   = { bc_screen.x/clip[0].w, bc_screen.y/clip[1].w, bc_screen.z/clip[2].w };
-            // 归一化重心坐标
+            // 归一化权重
             bc_clip = bc_clip / (bc_clip.x + bc_clip.y + bc_clip.z);
             // 屏幕空间重心坐标为负表示像素在三角形外部
             if (bc_screen.x<0 || bc_screen.y<0 || bc_screen.z<0) continue;
