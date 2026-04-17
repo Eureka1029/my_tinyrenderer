@@ -1,25 +1,26 @@
 #include "tgaimage.h"
 #include "geometry.h"
 
-// 构建模型视图矩阵（摄像机变换）
+// 设置观察矩阵
 void lookat(const vec3 eye, const vec3 center, const vec3 up);
-// 初始化透视投影矩阵
+// 设置透视投影矩阵
 void init_perspective(const double f);
-// 初始化视口变换（屏幕映射）
+// 设置视口矩阵
 void init_viewport(const int x, const int y, const int w, const int h);
 // 初始化深度缓冲区
 void init_zbuffer(const int width, const int height);
 
-// 着色器接口基类
+// 着色器接口
 struct IShader {
-    // 片段着色器虚函数：返回是否丢弃该像素，以及输出颜色
-    virtual std::pair<bool,TGAColor> fragment(const vec3 bar) const = 0;
+    // 从纹理中采样（双线性插值）
     static TGAColor sample2D(const TGAImage &img, const vec2 &uvf) {
         return img.get(uvf[0] * img.width(), uvf[1] * img.height());
     }
+    // 片段着色器，返回是否丢弃该片段和颜色值
+    virtual std::pair<bool,TGAColor> fragment(const vec3 bar) const = 0;
 };
 
-// 三角形图元类型：由三个有序点（同次坐标）组成
+// 三角形原始体: 由三个有序点组成
 typedef vec4 Triangle[3];
-// 光栅化函数：将三角形绘制到帧缓冲中
+// 光栅化三角形
 void rasterize(const Triangle &clip, const IShader &shader, TGAImage &framebuffer);

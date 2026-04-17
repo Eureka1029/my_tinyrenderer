@@ -2,73 +2,77 @@
 #include <sstream>
 #include "model.h"
 
-// 模型构造函数：从 OBJ 文件加载模型数据和纹理
+// 根据 文件路径加载模型
 Model::Model(const std::string filename) {
     std::ifstream in;
     in.open(filename, std::ifstream::in);
     if (in.fail()) return;
     std::string line;
-    // 逐行读取 OBJ 文件
     while (!in.eof()) {
         std::getline(in, line);
         std::istringstream iss(line.c_str());
         char trash;
+        // 处理顶点（v 命令）
         if (!line.compare(0, 2, "v ")) {
-            // 解析顶点数据
             iss >> trash;
             vec4 v = {0,0,0,1};
             for (int i : {0,1,2}) iss >> v[i];
             verts.push_back(v);
-        } else if (!line.compare(0, 3, "vn ")) {
-            // 解析法向量数据
+        }
+        // 处理法线（vn 命令）
+        else if (!line.compare(0, 3, "vn ")) {
             iss >> trash >> trash;
             vec4 n;
             for (int i : {0,1,2}) iss >> n[i];
             norms.push_back(normalized(n));
-        } else if (!line.compare(0, 3, "vt ")) {
-            // 解析纹理坐标数据
+        }
+        // 处理纹理坐标（vt 命令）
+        else if (!line.compare(0, 3, "vt ")) {
             iss >> trash >> trash;
             vec2 uv;
             for (int i : {0,1}) iss >> uv[i];
-            tex.push_back({uv.x, 1-uv.y});  // 翻转 V 坐标
-        } else if (!line.compare(0, 2, "f ")) {
-            // 解析面数据（顶点/纹理坐标/法向量的索引）
+            // 穻坐标 Y 经常需要翻转（OBJ 格式的 UV 系统常常是翻转的）
+            tex.push_back({uv.x, 1-uv.y});
+        }
+        // 处理面片（f 命令）
+        else if (!line.compare(0, 2, "f ")) {
             int f,t,n, cnt = 0;
             iss >> trash;
             while (iss >> f >> trash >> t >> trash >> n) {
-                facet_vrt.push_back(--f);   // 顶点索引（OBJ 中从 1 开始，转换为 0 开始）
-                facet_tex.push_back(--t);   // 纹理坐标索引
-                facet_nrm.push_back(--n);   // 法向量索引
+                facet_vrt.push_back(--f);
+                facet_tex.push_back(--t);
+                facet_nrm.push_back(--n);
                 cnt++;
             }
+            // 检查是否是三角形（OBJ 文件需要是三角流化的）
             if (3!=cnt) {
-                std::cerr << "错误：OBJ 文件中的面必须是三角形" << std::endl;
+                std::cerr << "Error: the obj file is supposed to be triangulated" << std::endl;
                 return;
             }
         }
     }
-    std::cerr << "# 顶点数: " << nverts() << " 面数: "  << nfaces() << std::endl;
-    
-    // 纹理加载 Lambda 函数
+    std::cerr << "# v# " << nverts() << " f# "  << nfaces() << std::endl;
+    // 加载纹理映射文本文件
     auto load_texture = [&filename](const std::string suffix, TGAImage &img) {
         size_t dot = filename.find_last_of(".");
         if (dot==std::string::npos) return;
         std::string texfile = filename.substr(0,dot) + suffix;
-        std::cerr << "纹理文件 " << texfile << " 加载 " << (img.read_tga_file(texfile.c_str()) ? "成功" : "失败") << std::endl;
+        std::cerr << "texture file " << texfile << " loading " << (img.read_tga_file(texfile.c_str()) ? "ok" : "failed") << std::endl;
     };
-    
-    // 加载各类纹理
-    load_texture("_diffuse.tga",    diffusemap );   // 漫反射纹理
-    load_texture("_nm_tangent.tga", normalmap);     // 切线空间法线贴图
-    load_texture("_spec.tga",       specularmap);   // 高光纹理
+    // 加载漫反射纹理（颜色）
+    load_texture("_diffuse.tga",    diffusemap );
+//  load_texture("_glow.tga",    diffusemap );
+    // 加载法线贴图、高光纹理
+    load_texture("_nm_tangent.tga", normalmap);
+    load_texture("_spec.tga",       specularmap);
 }
 
-// 获取顶点数
+// 获取顶点数量
 int Model::nverts() const { return verts.size(); }
-// 获取三角形面数
+// 获取三角形数量
 int Model::nfaces() const { return facet_vrt.size()/3; }
 
-// 获取索引为 i 的顶点（0 <= i < nverts()）
+// 获取第 i 个顶点
 vec4 Model::vert(const int i) const {
     return verts[i];
 }
@@ -78,19 +82,18 @@ vec4 Model::vert(const int iface, const int nthvert) const {
     return verts[facet_vrt[iface*3+nthvert]];
 }
 
-// 获取第 iface 个三角形的第 nthvert 个顶点的法向量
+// 获取第 iface 个三角形的第 nthvert 个顶点法线
 vec4 Model::normal(const int iface, const int nthvert) const {
     return norms[facet_nrm[iface*3+nthvert]];
 }
 
-// 从法线贴图中采样切线空间的法向量
+// 根据 UV 坐标从法线贴图中获取法线向量
 vec4 Model::normal(const vec2 &uv) const {
     TGAColor c = normalmap.get(uv[0]*normalmap.width(), uv[1]*normalmap.height());
-    // 将 RGB 颜色值转换为 [-1, 1] 范围的法向量
     return normalized(vec4{(double)c[2],(double)c[1],(double)c[0],0}*2./255. - vec4{1,1,1,0});
 }
 
-// 获取第 iface 个三角形的第 nthvert 个顶点的纹理坐标
+// 获取第 iface 个三角形的第 nthvert 个顶点的 UV 坐标
 vec2 Model::uv(const int iface, const int nthvert) const {
     return tex[facet_tex[iface*3+nthvert]];
 }
