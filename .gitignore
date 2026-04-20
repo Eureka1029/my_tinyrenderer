@@ -1,0 +1,8 @@
+# macOS metadata
+.DS_Store
+
+# Build artifact
+/main
+
+# Renderer outputs generated in repository root
+/*.tga
